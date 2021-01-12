@@ -17,7 +17,7 @@ public class MetalView: NSObject, MTKViewDelegate {
     device = MTLCreateSystemDefaultDevice()!
     queue = device.makeCommandQueue()
     guard let library = device.makeDefaultLibrary(),
-          let kernel = library.makeFunction(name: "sphereHall") else {
+          let kernel = library.makeFunction(name: "hollowHall") else {
       fatalError("Could not create compute function.")
     }
     do {
