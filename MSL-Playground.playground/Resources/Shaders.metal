@@ -60,6 +60,18 @@ float distToBoundingBox(Ray ray, BoundingBox bb) {
 
 // MARK: Intersection Helpers
 
+float3 sdfNormalEstimate(float (*sdfFunc)(Ray), Ray r) {
+  float epsilon = 0.01;
+  float3 p = r.origin;
+  
+  float3 estimate = float3(
+          sdfFunc(Ray(float3(p.x + epsilon, p.y, p.z), r.direction)) - sdfFunc(Ray(float3(p.x - epsilon, p.y, p.z), r.direction)),
+          sdfFunc(Ray(float3(p.x, p.y + epsilon, p.z), r.direction)) - sdfFunc(Ray(float3(p.x, p.y - epsilon, p.z), r.direction)),
+          sdfFunc(Ray(float3(p.x, p.y, p.z  + epsilon), r.direction)) - sdfFunc(Ray(float3(p.x, p.y, p.z - epsilon), r.direction))
+      );
+  return normalize(estimate);
+}
+
 float sdfUnion(float d1, float d2) {
   return min(d1, d2);
 }
@@ -110,7 +122,19 @@ float distToBoundingBoxScene(Ray r) {
   repeatRay.origin = fmod(r.origin, 2.0);
   float d1 = distToBoundingBox(repeatRay, bb);
   float d2 = distToSphere(repeatRay, s);
-  float dist = sdfIntersection(d1, d2);
+  float dist = sdfSmoothIntersection(d1, d2, 0.2);
+  return dist;
+}
+
+float distToMorphingScene(Ray r, float time) {
+  BoundingBox bb = BoundingBox(float3(0.0, 0.0, cos(time)), float3(1.0), 0.25);
+  //Sphere s2 = Sphere(float3(0.0, sin(time), cos(time)), 0.8);
+  Sphere s = Sphere(float3(sin(time), 0.0, 0.0), 0.8);
+  Ray repeatRay = r;
+  float d1 = distToBoundingBox(repeatRay, bb);
+  //float d1 = distToSphere(repeatRay, s2);
+  float d2 = distToSphere(repeatRay, s);
+  float dist = sdfSmoothIntersection(d2, d1, 0.12);
   return dist;
 }
 
@@ -122,6 +146,12 @@ float2 getUV(int width, int height, float2 gid) {
   return uv;
 }
 
+float4x4 createViewMatrix(float3 eyePos, float3 focusPos, float3 up) {
+  float3 f = normalize(focusPos - eyePos);
+  float3 s = normalize(cross(f, up));
+  float3 u = cross(s, up);
+  return float4x4(float4(s, 0.0), float4(u, 0.0), float4(-f, 0.0), float4(float3(0.0), 1.0));
+}
 
 // MARK: Sphere Scene
 kernel void sphereHall(texture2d<float, access::write> output [[texture(0)]],
@@ -174,17 +204,31 @@ kernel void hollowHall(texture2d<float, access::write> output [[texture(0)]],
   for (int i=0.0; i<100.0; i++) {
     float dist = distToBoundingBoxScene(ray);
     if (dist < 0.001) {
-      col = float3(1.0);
+      col = abs(sdfNormalEstimate(&distToBoundingBoxScene, ray));
       break;
     }
     ray.origin += ray.direction * dist;
   }
-  float3 posRelativeToCamera = ray.origin - camPos;
-  output.write(float4(col * abs(posRelativeToCamera / 10.0), 1.0), gid);
+  output.write(float4(col, 1.0), gid);
 }
 
-kernel void mandel(texture2d<float, access::write> output [[texture(0)]],
+kernel void morphing(texture2d<float, access::write> output [[texture(0)]],
                    constant float &time [[buffer(0)]],
                    uint2 gid [[thread_position_in_grid]]) {
-  
+  float2 uv = getUV(output.get_width(), output.get_height(), float2(gid));
+  float3 camPos = float3(0.0, 0.0, -1.0);
+  Ray ray = Ray(camPos, normalize(float3(uv, 1.0)));
+  float3 col = float3(0.0);
+  for (int i=0.0; i<100.0; i++) {
+    float dist = distToMorphingScene(ray, time);
+    if (dist < 0.001) {
+      //col = float3(1.0 / (smoothstep(0.0, 0.0009, dist) + i));
+      float posRelativeToCamera = length(ray.origin - camPos);
+      //col = float3(1.0 - (ray.origin + ray.direction * dist).z);
+      col = clamp(float3(1.0 - posRelativeToCamera) + 0.3, 0.0, 1.0);
+      break;
+    }
+    ray.origin += ray.direction * dist;
+  }
+  output.write(float4(col, 1.0), gid);
 }
