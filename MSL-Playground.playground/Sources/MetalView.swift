@@ -17,7 +17,7 @@ public class MetalView: NSObject, MTKViewDelegate {
     device = MTLCreateSystemDefaultDevice()!
     queue = device.makeCommandQueue()
     guard let library = device.makeDefaultLibrary(),
-          let kernel = library.makeFunction(name: "hollowHall") else {
+          let kernel = library.makeFunction(name: "iridescentHall") else {
       fatalError("Could not create compute function.")
     }
     do {
@@ -40,7 +40,7 @@ public class MetalView: NSObject, MTKViewDelegate {
       time += 0.01
       let bufferPointer = timeBuffer.contents()
       memcpy(bufferPointer, &time, MemoryLayout<Float>.size)
-      let threadGroupCount = MTLSizeMake(16, 16, 1)
+      let threadGroupCount = MTLSizeMake(32, 32, 1)
       let threadGroups = MTLSizeMake(drawable.texture.width / threadGroupCount.width, drawable.texture.height / threadGroupCount.height, 1)
       commandEncoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupCount)
       commandEncoder.endEncoding()
