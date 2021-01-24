@@ -38,6 +38,18 @@ struct BoundingBox {
   }
 };
 
+struct Plane {
+  float3 normal;
+  float size;
+  Plane(float3 n, float s){
+    normal = normalize(n);
+    size = s;
+  }
+  float distToPoint(float3 point) {
+    return dot(point, normal) + size;
+  }
+};
+
 // MARK: Distance Functions
 
 float distToSphere(Ray ray, Sphere s) {
@@ -152,6 +164,15 @@ float4x4 createViewMatrix(float3 eyePos, float3 focusPos, float3 up) {
   float3 s = normalize(cross(f, up));
   float3 u = cross(s, up);
   return float4x4(float4(s, 0.0), float4(u, 0.0), float4(-f, 0.0), float4(float3(0.0), 1.0));
+}
+
+float4x4 createTranslateMatrix(float3 t) {
+  float4x4 m;
+  m[0] = float4(1.0, 0.0, 0.0, t.x);
+  m[1] = float4(0.0, 1.0, 0.0, t.y);
+  m[2] = float4(0.0, 0.0, 1.0, t.z);
+  m[3] = float4(0.0, 0.0, 0.0, 1.0);
+  return m;
 }
 
 float2 hash2(float2 p) {
@@ -333,20 +354,18 @@ kernel void iridescentHall(texture2d<float, access::write> output [[texture(0)]]
   output.write(float4(col, 1.0), gid);
 }
 
-kernel void morphing(texture2d<float, access::write> output [[texture(0)]],
+kernel void shadowMap(texture2d<float, access::write> output [[texture(0)]],
                      constant float &time [[buffer(0)]],
                      uint2 gid [[thread_position_in_grid]]) {
   float2 uv = getUV(output.get_width(), output.get_height(), float2(gid));
   float3 camPos = float3(0.0, 0.0, -1.0);
   Ray ray = Ray(camPos, normalize(float3(uv, 1.0)));
+  Plane plane = Plane(float3(0.0, 1.0, 0.0), 500.0);
   float3 col = float3(0.0);
   for (int i=0.0; i<100.0; i++) {
-    float dist = distToMorphingScene(ray, time);
+    float dist = plane.distToPoint(ray.origin);
     if (dist < 0.001) {
-      //col = float3(1.0 / (smoothstep(0.0, 0.0009, dist) + i));
-      float posRelativeToCamera = length(ray.origin - camPos);
-      //col = float3(1.0 - (ray.origin + ray.direction * dist).z);
-      col = clamp(float3(1.0 - posRelativeToCamera) + 0.3, 0.0, 1.0);
+      col = float3(1.0);
       break;
     }
     ray.origin += ray.direction * dist;
