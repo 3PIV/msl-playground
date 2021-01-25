@@ -8,7 +8,7 @@ struct Ray {
   float3 direction;
   Ray(float3 o, float3 d) {
     origin = o;
-    direction = d;
+    direction = normalize(d);
   }
 };
 
@@ -18,6 +18,9 @@ struct Sphere {
   Sphere(float3 c, float r) {
     center = c;
     radius = r;
+  }
+  float distToPoint(float3 point){
+    return length(point - center) - radius;
   }
 };
 
@@ -235,6 +238,11 @@ float3 getJetSpectra(float2 uv) {
   return saturate(c);
 }
 
+// MARK: Phong calculator
+float3 phongLighting(float3 ambColor, float3 specColor, float attenuation, float diffuse, float specular){
+  return ambColor + attenuation * (diffuse + specular) * (specColor);
+}
+
 // MARK: Sphere Scene
 kernel void sphereHall(texture2d<float, access::write> output [[texture(0)]],
                        constant float &time [[buffer(0)]],
@@ -354,18 +362,90 @@ kernel void iridescentHall(texture2d<float, access::write> output [[texture(0)]]
   output.write(float4(col, 1.0), gid);
 }
 
+
+Plane shadowPlane() {
+  return Plane(float3(0.0, 1.0, 0.0), 0.8);
+}
+
+Sphere shadowSphere() {
+  return Sphere(float3(0.0, 0.0, 2.0), 1.0);
+}
+
+float distToShadowScene(Ray ray) {
+  Plane plane = shadowPlane();
+  Sphere sphere = shadowSphere();
+  float distPlane = plane.distToPoint(ray.origin);
+  float distSphere = sphere.distToPoint(ray.origin);
+  return sdfUnion(distPlane, distSphere);
+}
+
+float3 getShadow(Ray ray) {
+  Ray nuRay = ray;
+  float3 res = float3(1.0);
+  float k = 50.0;
+  float t = 0.1;
+  for (int i = 0.0; i < 100.0; ++i){
+    float dist = shadowSphere().distToPoint(nuRay.origin);
+    if (dist < 0.001){
+      return float3(0.0);
+    }
+    res = min(res, k * dist / t);
+    nuRay.origin += nuRay.direction * dist;
+    t += dist;
+  }
+  return res;
+}
+
 kernel void shadowMap(texture2d<float, access::write> output [[texture(0)]],
                      constant float &time [[buffer(0)]],
                      uint2 gid [[thread_position_in_grid]]) {
   float2 uv = getUV(output.get_width(), output.get_height(), float2(gid));
   float3 camPos = float3(0.0, 0.0, -1.0);
+  float3 lightPos = float3(3.0 * sin(time), 0.0, 0.0);
   Ray ray = Ray(camPos, normalize(float3(uv, 1.0)));
-  Plane plane = Plane(float3(0.0, 1.0, 0.0), 500.0);
+  
+  // Plane info
+  Plane plane = shadowPlane();
+  float3 planeAmbient = float3(0.4);
+  float3 planeSpecular = planeAmbient + 0.4;
+  
+  // Sphere info
+  Sphere sphere = shadowSphere();
+  float3 sphereAmbient = float3(0.5, 0.3, 0.4);
+  float3 sphereSpecular = sphereAmbient + 0.4;
+
   float3 col = float3(0.0);
-  for (int i=0.0; i<100.0; i++) {
-    float dist = plane.distToPoint(ray.origin);
+  for (int i=0.0; i<100.0; ++i) {
+    float3 surfacePos = ray.origin;
+    float distPlane = plane.distToPoint(ray.origin);
+    float distSphere = sphere.distToPoint(ray.origin);
+    float dist = distToShadowScene(ray);
     if (dist < 0.001) {
       col = float3(1.0);
+      float3 shadow = getShadow(Ray(lightPos, surfacePos - lightPos));
+      
+      float3 ambColor = float3(0.4);
+      float3 specColor = ambColor + 0.4;
+      if (distPlane >= distSphere) {
+        ambColor = float3(0.2, 0.05, 0.05);
+        specColor = float3(1.0, 0.6, 0.6);
+      }
+        
+      float3 normal = normalize(sdfNormalEstimate(&distToShadowScene, ray));
+      float3 lightDirection = normalize(lightPos - surfacePos);
+      float diffuse = saturate(dot(normal, lightDirection));
+      float3 cameraDirection = normalize(camPos - surfacePos);
+      
+      float specular = 0.0;
+      if (diffuse > 0.0) {
+        specular = pow(saturate(dot(cameraDirection, reflect(-lightDirection, normal))), 200);
+      }
+      float distanceToLight = length(camPos - surfacePos);
+      float attenuation = 1.0 / (1.0 + 0.2 * pow(distanceToLight, 2));
+      
+      col = phongLighting(ambColor, specColor, attenuation, diffuse, specular);
+      if (distPlane < distSphere)
+        col *= shadow;
       break;
     }
     ray.origin += ray.direction * dist;
