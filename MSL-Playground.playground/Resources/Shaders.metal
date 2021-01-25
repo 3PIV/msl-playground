@@ -380,17 +380,16 @@ float distToShadowScene(Ray ray) {
 }
 
 float3 getShadow(Ray ray) {
-  Ray nuRay = ray;
   float3 res = float3(1.0);
-  float k = 50.0;
+  float k = 20.0;
   float t = 0.1;
-  for (int i = 0.0; i < 100.0; ++i){
-    float dist = shadowSphere().distToPoint(nuRay.origin);
-    if (dist < 0.001){
+  for (int i = 0.0; i < 10.0; ++i){
+    float dist = shadowSphere().distToPoint(ray.origin);
+    if (dist < 0.01){
       return float3(0.0);
     }
     res = min(res, k * dist / t);
-    nuRay.origin += nuRay.direction * dist;
+    ray.origin += ray.direction * dist;
     t += dist;
   }
   return res;
@@ -401,7 +400,7 @@ kernel void shadowMap(texture2d<float, access::write> output [[texture(0)]],
                      uint2 gid [[thread_position_in_grid]]) {
   float2 uv = getUV(output.get_width(), output.get_height(), float2(gid));
   float3 camPos = float3(0.0, 0.0, -1.0);
-  float3 lightPos = float3(3.0 * sin(time), 0.0, 0.0);
+  float3 lightPos = float3(3.0 * sin(time * 3.0), 5.0, 2.0);
   Ray ray = Ray(camPos, normalize(float3(uv, 1.0)));
   
   // Plane info
@@ -420,9 +419,8 @@ kernel void shadowMap(texture2d<float, access::write> output [[texture(0)]],
     float distPlane = plane.distToPoint(ray.origin);
     float distSphere = sphere.distToPoint(ray.origin);
     float dist = distToShadowScene(ray);
-    if (dist < 0.001) {
+    if (dist < 0.01) {
       col = float3(1.0);
-      float3 shadow = getShadow(Ray(lightPos, surfacePos - lightPos));
       
       float3 ambColor = float3(0.4);
       float3 specColor = ambColor + 0.4;
@@ -444,8 +442,10 @@ kernel void shadowMap(texture2d<float, access::write> output [[texture(0)]],
       float attenuation = 1.0 / (1.0 + 0.2 * pow(distanceToLight, 2));
       
       col = phongLighting(ambColor, specColor, attenuation, diffuse, specular);
-      if (distPlane < distSphere)
+      if (distPlane < distSphere) {
+        float3 shadow = getShadow(Ray(lightPos, normalize(surfacePos - lightPos)));
         col *= shadow;
+      }
       break;
     }
     ray.origin += ray.direction * dist;
